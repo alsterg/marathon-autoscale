@@ -359,55 +359,55 @@ class Autoscaler():
                             help=('The DNS hostname or IP of your Marathon'
                                   ' Instance'),
                             **self.env_or_req('AS_DCOS_MASTER'))
-        parser.add_argument('--max_mem_percent',
+        parser.add_argument('--max_mem_percent', type=float,
                             help=('The Max percent of Mem Usage averaged '
                                   'across all Application Instances to trigger'
                                   ' Autoscale (ie. 80)'),
-                            **self.env_or_req('AS_MAX_MEM_PERCENT'), type=float)
-        parser.add_argument('--max_cpu_time',
+                            **self.env_or_req('AS_MAX_MEM_PERCENT'))
+        parser.add_argument('--max_cpu_time', type=float,
                             help=('The max percent of CPU Usage averaged across'
                                   ' all Application Instances to trigger '
                                   'Autoscale (ie. 80)'),
-                            **self.env_or_req('AS_MAX_CPU_TIME'), type=float)
-        parser.add_argument('--min_mem_percent',
+                            **self.env_or_req('AS_MAX_CPU_TIME'))
+        parser.add_argument('--min_mem_percent', type=float,
                             help=('The min percent of Mem Usage averaged across'
                                   ' all Application Instances to trigger '
                                   'Autoscale (ie. 55)'),
-                            **self.env_or_req('AS_MIN_MEM_PERCENT'), type=float)
-        parser.add_argument('--min_cpu_time',
+                            **self.env_or_req('AS_MIN_MEM_PERCENT'))
+        parser.add_argument('--min_cpu_time', type=float,
                             help=('The min percent of CPU Usage averaged across'
                                   ' all Application Instances to trigger '
                                   'Autoscale (ie. 50)'),
-                            **self.env_or_req('AS_MIN_CPU_TIME'), type=float)
+                            **self.env_or_req('AS_MIN_CPU_TIME'))
         parser.add_argument('--trigger_mode',
                             help=('Which metric(s) to trigger Autoscale '
                                   '(and, or, cpu, mem)'),
                             **self.env_or_req('AS_TRIGGER_MODE'))
-        parser.add_argument('--autoscale_multiplier',
+        parser.add_argument('--autoscale_multiplier', type=float,
                             help=('Autoscale multiplier for triggered '
                                   'Autoscale (ie 2)'),
-                            **self.env_or_req('AS_AUTOSCALE_MULTIPLIER'), type=float)
-        parser.add_argument('--max_instances',
+                            **self.env_or_req('AS_AUTOSCALE_MULTIPLIER'))
+        parser.add_argument('--max_instances', type=int,
                             help=('The Max instances that should ever exist'
                                   ' for this application (ie. 20)'),
-                            **self.env_or_req('AS_MAX_INSTANCES'), type=int)
+                            **self.env_or_req('AS_MAX_INSTANCES'))
         parser.add_argument('--marathon-app',
                             help=('Marathon Application Name to Configure '
                                   'Autoscale for from the Marathon UI'),
                             **self.env_or_req('AS_MARATHON_APP'))
-        parser.add_argument('--min_instances',
+        parser.add_argument('--min_instances', type=int,
                             help='Minimum number of instances to maintain',
-                            **self.env_or_req('AS_MIN_INSTANCES'), type=int)
-        parser.add_argument('--cool-down-factor',
+                            **self.env_or_req('AS_MIN_INSTANCES'))
+        parser.add_argument('--cool-down-factor', type=int,
                             help='Number of cycles to avoid scaling again',
-                            **self.env_or_req('AS_COOL_DOWN_FACTOR'), type=int)
-        parser.add_argument('--trigger_number',
+                            **self.env_or_req('AS_COOL_DOWN_FACTOR'))
+        parser.add_argument('--trigger_number', type=int,
                             help='Number of cycles to avoid scaling again',
-                            **self.env_or_req('AS_TRIGGER_NUMBER'), type=int)
-        parser.add_argument('--interval',
+                            **self.env_or_req('AS_TRIGGER_NUMBER'))
+        parser.add_argument('--interval', type=int,
                             help=('Time in seconds to wait between '
                                   'checks (ie. 20)'),
-                            **self.env_or_req('AS_INTERVAL'), type=int)
+                            **self.env_or_req('AS_INTERVAL'))
         parser.add_argument('-v', '--verbose', action="store_true",
                             help='Display DEBUG messages')
         try:
