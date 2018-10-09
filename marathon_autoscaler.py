@@ -8,13 +8,14 @@ import math
 import os
 import sys
 import time
-
-import jwt
+from marathon import MarathonClient
 import requests
 
 # Disable InsecureRequestWarning
-from requests.packages.urllib3.exceptions import InsecureRequestWarning # pylint: disable=F0401
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning) # pylint: disable=E1101
+from requests.packages.urllib3.exceptions import InsecureRequestWarning  # pylint: disable=F0401
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)  # pylint: disable=E1101
+
+MARATHON_AGENT_PORT = ':5051'
 
 # Generating CPU stress:
 # yes > /dev/null &
@@ -24,25 +25,24 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning) # pylint: dis
 # for i in $(seq 5); do BLOB=$(dd if=/dev/urandom bs=1MB count=14); sleep 3s;\
 # echo "iteration $i"; done
 
+
 # pylint: disable=too-many-instance-attributes
-class Autoscaler():
+class Autoscaler:
     """Marathon auto scaler
     upon initialization, it reads a list of command line parameters or env
-    variables. Then it logs in to DCOS and starts querying metrics relevant
+    variables. Then it logs in to Marathon and starts querying metrics relevant
     to the scaling objective (cpu,mem). Scaling can happen by cpu, mem,
     cpu and mem, cpu or mem. The checks are performed on a configurable
     interval.
     """
-    ERR_THRESHOLD = 10 # Maximum number of attempts to decode a response
+
     def __init__(self):
         """Initialize the object with data from the command line or environment
-        variables. Log in into DCOS if username / password are provided.
-        Set up logging according to the verbosity requested.
+        variables. Connect to Marathon. Set up logging according to the verbosity requested.
         """
         self.app_instances = 0
         self.trigger_var = 0
         self.cool_down = 0
-        self.dcos_headers = {}
 
         self.parse_arguments()
         # Start logging
@@ -55,98 +55,10 @@ class Autoscaler():
             level=level,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         self.log = logging.getLogger("marathon-autoscaler")
-        # Set auth header
-        self.authenticate()
 
-    def authenticate(self):
-        """Using a userid/pass or a service account secret,
-        get or renew JWT auth token
-        Returns:
-            Sets dcos_headers to be used for authentication
-        """
-        # Get the certificate authority
-        if not os.path.isfile('dcos-ca.crt'):
-            response = requests.get(self.dcos_master + '/ca/dcos-ca.crt', verify=False)
-            with open("dcos-ca.crt", "wb") as crt_file:
-                crt_file.write(response.content)
-
-        if ('AS_USERID' in os.environ.keys()) and ('AS_PASSWORD' in os.environ.keys()):
-            auth_data = json.dumps({'uid' : os.environ.get('AS_USERID'),
-                                    'password' : os.environ.get('AS_PASSWORD')})
-        elif ('AS_SECRET' in os.environ.keys()) and ('AS_USERID' in os.environ.keys()):
-            # Get the private key from the autoscaler secret
-            saas = json.loads(os.environ.get('AS_SECRET'))
-            # Create a JWT token
-            jwt_token = jwt.encode({'uid': os.environ.get('AS_USERID')},
-                                   saas['private_key'], algorithm='RS256')
-            auth_data = json.dumps({"uid": os.environ.get('AS_USERID'),
-                                    "token": jwt_token.decode('utf-8')})
-        else:
-            self.dcos_headers = {'Content-type': 'application/json'}
-            return
-
-        # Create or renew auth token for the service account
-        response = requests.post(self.dcos_master + "/acs/api/v1/auth/login",
-                                 headers={"Content-type": "application/json"},
-                                 data=auth_data,
-                                 verify="dcos-ca.crt")
-        result = response.json()
-        if 'token' not in result:
-            sys.stderr.write("Unable to authenticate or renew JWT token: %s", result)
-            sys.exit(1)
-
-        self.dcos_headers = {
-            'Authorization': 'token=' + result['token'],
-            'Content-type': 'application/json'}
-
-    def dcos_rest(self, method, path, data=None):
-        """Common querying procedure that handles 401 errors
-        Args:
-            path (str): URI path after the mesos master address
-        Returns:
-            JSON requests.response.content result of the query
-        """
-        err_num = 0
-        done = False
-        while not done:
-
-            if data is None:
-                response = requests.request(method, self.dcos_master + path,
-                                            headers=self.dcos_headers,
-                                            verify=False)
-            else:
-                response = requests.request(method, self.dcos_master + path,
-                                            headers=self.dcos_headers,
-                                            data=data,
-                                            verify=False)
-
-            self.log.debug("%s %s %s", method, path, response.status_code)
-            done = True
-            if response.status_code != 200:
-                if response.status_code == 401:
-                    self.log.info("Authenticating")
-                    self.authenticate()
-                    done = False
-                else:
-                    response.raise_for_status()
-
-            content = response.content.strip()
-            if not content:
-                content = "{}"
-
-            try:
-                result = json.loads(content)
-                return result
-            except json.JSONDecodeError as dec_err:
-                done = False
-                err_num += 1
-                self.log.error("Non JSON result returned: %s", dec_err)
-                if err_num > self.ERR_THRESHOLD:
-                    self.log.error("FATAL: Threshold of JSON parsing errors "
-                                   "exceeded. Shutting down.")
-                    sys.exit(1)
-
-                self.timer()
+        self.log.info("Connecting to marathon at '%s'" % self.marathon_master)
+        self.client = MarathonClient(self.marathon_master, verify=False,
+                                     username=self.marathon_username, password=self.marathon_password)
 
     # pylint: disable=too-many-branches
     # pylint: disable=too-many-statements
@@ -279,11 +191,10 @@ class Autoscaler():
             else:
                 self.log.info("Mem usage not exceeding threshold")
 
-
     def scale_app(self, is_up):
         """Scale marathon_app up or down
         Args:
-            is_ip(bool): Scale up if True, scale down if False
+            is_up(bool): Scale up if True, scale down if False
         """
         if is_up:
             target_instances = math.ceil(self.app_instances * self.autoscale_multiplier)
@@ -296,39 +207,30 @@ class Autoscaler():
                 self.log.info("Reached the set minimum of instances %s", self.min_instances)
                 target_instances = self.min_instances
 
-        self.log.debug("scale_app: app_instances %s target_instances %s",
-                       self.app_instances, target_instances)
         if self.app_instances != target_instances:
-            data = {'instances': target_instances}
-            json_data = json.dumps(data)
-            response = self.dcos_rest("put",
-                                      '/service/marathon/v2/apps/' + self.marathon_app,
-                                      data=json_data)
-            #self.log.debug("scale_app returned status code %s", response.status_code)
-            # self.app_instances will be updated next time get_app_details is called
+            self.log.info("scale_app: app_instances=%s target_instances=%s", self.app_instances, target_instances)
+            response = self.client.scale_app(self.marathon_app, instances=target_instances)
             self.log.debug("scale_app %s", response)
 
     def get_app_details(self):
         """Retrieve metadata about marathon_app
         Returns:
-            Dictionary of task_id mapped to mesos slave_id
+            Dictionary of task_id mapped to mesos slave url
         """
-        response = self.dcos_rest("get", '/service/marathon/v2/apps/' +
-                                  self.marathon_app)
-        if response['app']['tasks'] == []:
+        app = self.client.get_app(self.marathon_app)
+        if len(app.tasks) == 0:
             self.log.error('No task data in marathon for app %s', self.marathon_app)
         else:
-            self.app_instances = response['app']['instances']
+            self.app_instances = app.instances
             self.log.debug("Marathon app %s has %s deployed instances",
                            self.marathon_app, self.app_instances)
             app_task_dict = {}
-            for i in response['app']['tasks']:
-                taskid = i['id']
-                hostid = i['host']
-                slave_id = i['slaveId']
-                self.log.debug("Task %s is running on host %s with slaveId %s"
-                               , taskid, hostid, slave_id)
-                app_task_dict[str(taskid)] = str(slave_id)
+            for t in app.tasks:
+                taskid = t.id
+                hostid = t.host
+                slave_id = t.slave_id
+                self.log.debug("Task %s is running on host %s with slaveId %s", taskid, hostid, slave_id)
+                app_task_dict[str(taskid)] = str(hostid)
 
             return app_task_dict
 
@@ -337,17 +239,13 @@ class Autoscaler():
         Returns:
             a list of all marathon apps
         """
-        response = self.dcos_rest("get", '/service/marathon/v2/apps')
-        if response['apps'] == []:
+        apps = self.client.list_apps()
+        if len(apps) == 0:
             self.log.error("No Apps found on Marathon")
             sys.exit(1)
         else:
-            apps = []
-            for i in response['apps']:
-                appid = i['id'].strip('/')
-                apps.append(appid)
-            self.log.debug("Found the following marathon apps %s", apps)
-            return apps
+            ids = list(map(lambda a: a.id.strip('/'), apps))
+            return ids
 
     def parse_arguments(self):
         """Set up an argument parser
@@ -355,10 +253,11 @@ class Autoscaler():
         """
         parser = argparse.ArgumentParser(description='Marathon autoscale app.')
         parser.set_defaults()
-        parser.add_argument('--dcos-master',
+        parser.add_argument('--marathon-master',
                             help=('The DNS hostname or IP of your Marathon'
-                                  ' Instance'),
-                            **self.env_or_req('AS_DCOS_MASTER'))
+                                  ' Instance; remember to set MARATHON_USERNAME'
+                                  ' and MARATHON_PASSWORD to enable authentication'),
+                            **self.env_or_req('AS_marathon_master'))
         parser.add_argument('--max_mem_percent', type=float,
                             help=('The Max percent of Mem Usage averaged '
                                   'across all Application Instances to trigger'
@@ -417,7 +316,7 @@ class Autoscaler():
             parser.print_help()
             sys.exit(1)
 
-        self.dcos_master = args.dcos_master
+        self.marathon_master = args.marathon_master
         self.max_mem_percent = float(args.max_mem_percent)
         self.min_mem_percent = float(args.min_mem_percent)
         self.max_cpu_time = float(args.max_cpu_time)
@@ -431,35 +330,39 @@ class Autoscaler():
         self.trigger_number = float(args.trigger_number)
         self.interval = args.interval
         self.verbose = args.verbose or os.environ.get("AS_VERBOSE")
+        self.marathon_username = os.environ['MARATHON_USERNAME']
+        self.marathon_password = os.environ['MARATHON_PASSWORD']
 
-
-
-    def get_task_agent_stats(self, task, agent):
+    def get_task_slave_stats(self, task, host):
         """ Get the performance Metrics for all the tasks for the marathon
         app specified by connecting to the Mesos Agent and then making a
         REST call against Mesos statistics
         Args:
             task: marathon app task
-            agent: agent on which the task is run
+            host: host on which the task is running
         Returns:
             statistics for the specific task
         """
 
-        response = self.dcos_rest("get", '/slave/' + agent +
-                                  '/monitor/statistics.json')
-        for i in response:
+        self.log.debug("Connecting to %s", host)
+        response = requests.get('http://' + host + MARATHON_AGENT_PORT + '/monitor/statistics.json')
+        response.raise_for_status()
+        for i in response.json():
             executor_id = i['executor_id']
             if executor_id == task:
                 task_stats = i['statistics']
-                self.log.debug("stats for task %s agent %s: %s", executor_id, agent, task_stats)
+                self.log.debug("stats for task %s on host %s: %s", executor_id, host, task_stats)
                 return task_stats
 
+    def get_cpu_usage(self, task, host):
+        """Compute the cpu usage for a given task and slave within a sampled window of 1 second.
+        TODO: 1 second window is too small and is susceptible to spikes
 
-    def get_cpu_usage(self, task, agent):
-        """Compute the cpu usage per task per agent
+        Returns:
+            the number of CPU seconds that the task consumed on the slave including system and user space.
         """
-        task_stats = self.get_task_agent_stats(task, agent)
-        if task_stats != None:
+        task_stats = self.get_task_slave_stats(task, host)
+        if task_stats is not None:
             cpus_system_time_secs0 = float(task_stats['cpus_system_time_secs'])
             cpus_user_time_secs0 = float(task_stats['cpus_user_time_secs'])
             timestamp0 = float(task_stats['timestamp'])
@@ -470,8 +373,8 @@ class Autoscaler():
 
         time.sleep(1)
 
-        task_stats = self.get_task_agent_stats(task, agent)
-        if task_stats != None:
+        task_stats = self.get_task_slave_stats(task, host)
+        if task_stats is not None:
             cpus_system_time_secs1 = float(task_stats['cpus_system_time_secs'])
             cpus_user_time_secs1 = float(task_stats['cpus_user_time_secs'])
             timestamp1 = float(task_stats['timestamp'])
@@ -487,23 +390,26 @@ class Autoscaler():
 
         # CPU percentage usage
         if timestamp_delta == 0:
-            self.log.error("timestamp_delta for task %s agent %s is 0", task, agent)
+            self.log.error("timestamp_delta for task %s slave %s is 0", task, host)
             return -1.0
 
         cpu_usage = float(cpus_time_delta / timestamp_delta) * 100
         return cpu_usage
 
-    def get_mem_usage(self, task, agent):
-        """Calculate memory usage for the task on the given agent
+    def get_mem_usage(self, task, host):
+        """Calculate memory usage for a given task and slave
+
+        Returns:
+            the percentage of RSS memory used versus the limit.
         """
-        task_stats = self.get_task_agent_stats(task, agent)
+        task_stats = self.get_task_slave_stats(task, host)
         # RAM usage
-        if task_stats != None:
+        if task_stats is not None:
             mem_rss_bytes = int(task_stats['mem_rss_bytes'])
             mem_limit_bytes = int(task_stats['mem_limit_bytes'])
             if mem_limit_bytes == 0:
-                self.log.error("mem_limit_bytes for task %s agent %s is 0",
-                               task, agent)
+                self.log.error("mem_limit_bytes for task %s slave %s is 0",
+                               task, host)
                 return -1.0
 
             mem_utilization = 100 * (float(mem_rss_bytes) / float(mem_limit_bytes))
@@ -520,8 +426,7 @@ class Autoscaler():
     def timer(self):
         """Simple timer function
         """
-        self.log.debug("Successfully completed a cycle, sleeping for %s seconds ",
-                       self.interval)
+        self.log.debug("Completed a cycle, sleeping for %s seconds ", self.interval)
         time.sleep(self.interval)
 
     @staticmethod
@@ -547,9 +452,8 @@ class Autoscaler():
         self.trigger_var = 0
         while running == 1:
             marathon_apps = self.get_all_apps()
-            self.log.debug("The following apps exist in marathon %s", marathon_apps)
-            # Quick sanity check to test for apps existence in MArathon.
-            if not self.marathon_app in marathon_apps:
+            # Quick sanity check to test for apps existence in Marathon.
+            if self.marathon_app not in marathon_apps:
                 self.log.error("Could not find %s", self.marathon_app)
                 self.timer()
                 continue
@@ -560,18 +464,15 @@ class Autoscaler():
 
             app_cpu_values = []
             app_mem_values = []
-            for task, agent in app_task_dict.items():
-                self.log.info("Inspecting task %s on agent %s",
-                              task, agent)
-                # CPU usage
-                cpu_usage = self.get_cpu_usage(task, agent)
-                if cpu_usage == -1.0:
-                    self.timer()
-                    continue
+            for task, host in app_task_dict.items():
+                self.log.info("Inspecting task %s on slave %s", task, host)
 
-                # Memory usage
-                mem_utilization = self.get_mem_usage(task, agent)
-                if mem_utilization == -1.0:
+                cpu_usage = self.get_cpu_usage(task, host)
+                mem_utilization = self.get_mem_usage(task, host)
+                self.log.debug("Resource usage for task %s on slave %s is CPU:%.2f MEM:%.2f",
+                               task, host, cpu_usage, mem_utilization)
+
+                if cpu_usage == -1.0 or mem_utilization == -1.0:
                     self.timer()
                     continue
 
@@ -586,9 +487,10 @@ class Autoscaler():
             self.log.info("Current Average Mem Utilization for app %s = %s",
                           self.marathon_app, app_avg_mem)
 
-            #Evaluate whether an autoscale trigger is called for
+            # Evaluate whether an autoscale trigger is called for
             self.autoscale(app_avg_cpu, app_avg_mem)
             self.timer()
+
 
 if __name__ == "__main__":
     AS = Autoscaler()
