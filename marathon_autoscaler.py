@@ -45,6 +45,7 @@ class Autoscaler:
         self.app_instances = 0
         self.trigger_var = 0
         self.cool_down = 0
+        self.cpu_util_cache = {}  # (task, host) => last cpu utilization counter
 
         self.parse_arguments()
         # Start logging
@@ -357,45 +358,32 @@ class Autoscaler:
                 return task_stats
 
     def get_cpu_usage(self, task, host):
-        """Compute the cpu usage for a given task and slave within a sampled window of 1 second.
-        TODO: 1 second window is too small and is susceptible to spikes
+        """Compute the cpu usage for a given task and slave within the sampled window.
 
         Returns:
-            the number of CPU seconds that the task consumed on the slave including system and user space.
+            the % of CPU utilization since last time the cpu metrics were fetch for the same task/host.
         """
         task_stats = self.get_task_slave_stats(task, host)
         if task_stats is not None:
-            cpus_system_time_secs0 = float(task_stats['cpus_system_time_secs'])
-            cpus_user_time_secs0 = float(task_stats['cpus_user_time_secs'])
-            timestamp0 = float(task_stats['timestamp'])
+            cpus_system_time_secs_now = float(task_stats['cpus_system_time_secs'])
+            cpus_user_time_secs_now = float(task_stats['cpus_user_time_secs'])
+            cpus_time_total_now = cpus_system_time_secs_now + cpus_user_time_secs_now
+            timestamp_now = float(task_stats['timestamp'])
             cpus_limit = float(task_stats['cpus_limit'])
-            if cpus_limit == 0:
-                self.log.error("cpus_limit == 0")
-                return -1.0
         else:
-            self.log.error("Could not fetch stats")
-            return -1.0
+            raise Exception("Could not fetch stats from %s" % host)
 
-        time.sleep(1)
+        if (task, host) not in self.cpu_util_cache:
+            self.cpu_util_cache[(task, host)] = (cpus_time_total_now, timestamp_now)
+            return
 
-        task_stats = self.get_task_slave_stats(task, host)
-        if task_stats is not None:
-            cpus_system_time_secs1 = float(task_stats['cpus_system_time_secs'])
-            cpus_user_time_secs1 = float(task_stats['cpus_user_time_secs'])
-            timestamp1 = float(task_stats['timestamp'])
-        else:
-            self.log.error("Could not fetch stats")
-            return -1.0
+        cpus_time_total_prev, timestamp_prev = self.cpu_util_cache[(task, host)]
 
-        cpus_time_total0 = cpus_system_time_secs0 + cpus_user_time_secs0
-        cpus_time_total1 = cpus_system_time_secs1 + cpus_user_time_secs1
-        cpus_time_delta = cpus_time_total1 - cpus_time_total0
-        timestamp_delta = timestamp1 - timestamp0
+        cpus_time_delta = cpus_time_total_now - cpus_time_total_prev
+        timestamp_delta = timestamp_now - timestamp_prev
 
-        # CPU percentage usage
         if timestamp_delta == 0:
-            self.log.error("timestamp_delta for task %s slave %s is 0", task, host)
-            return -1.0
+            raise Exception("timestamp_delta for task %s host %s is 0" % (task, host))
 
         cpu_usage = float(cpus_time_delta / timestamp_delta / cpus_limit) * 100
         return cpu_usage
@@ -419,8 +407,7 @@ class Autoscaler:
             mem_utilization = 100 * (float(mem_rss_bytes) / float(mem_limit_bytes))
 
         else:
-            self.log.error("Could not fetch stats")
-            return -1.0
+            raise Exception("Could not fetch stats from %s" % host)
 
         self.log.debug("task %s mem_rss_bytes %s mem_utilization %s mem_limit_bytes %s",
                        task, mem_rss_bytes, mem_utilization, mem_limit_bytes)
@@ -451,8 +438,9 @@ class Autoscaler:
 
         cpu_usage = self.get_cpu_usage(task, host)
         mem_utilization = self.get_mem_usage(task, host)
+
         self.log.debug("Resource usage for task %s on slave %s is CPU:%.2f MEM:%.2f",
-                       task, host, cpu_usage, mem_utilization)
+                        task, host, cpu_usage, mem_utilization)
         return cpu_usage, mem_utilization
 
     def run(self):
@@ -484,14 +472,20 @@ class Autoscaler:
                     for f in concurrent.futures.as_completed(futures):
                         host = futures[f]
                         cpu_usage, mem_utilization = f.result()
-                        if cpu_usage == -1.0 or mem_utilization == -1.0:
-                            raise Exception("Failed to fetch metrics from host %s", host)
+                        if cpu_usage is None or mem_utilization is None:
+                            continue  # Ignore this host in this iteration, next time it will be ok
                         app_cpu_values.append(cpu_usage)
                         app_mem_values.append(mem_utilization)
                 except Exception as exc:
-                    self.log.error('Host %s generated an exception: %s' % (host, exc))
+                    # TODO: Cope with some slave failures
+                    self.log.error('Fetching metrics from %s generated an exception: %s' % (host, exc))
                     self.timer()
                     continue
+
+            if len(app_cpu_values) == 0 or len(app_mem_values) == 0:
+                self.log.info('Ignoring results of first iteration')
+                self.timer()
+                continue
 
             # Normalized data for all tasks into a single value by averaging
             app_avg_cpu = (sum(app_cpu_values) / len(app_cpu_values))
