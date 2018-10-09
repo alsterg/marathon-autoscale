@@ -483,10 +483,10 @@ class Autoscaler:
 
             # Normalized data for all tasks into a single value by averaging
             app_avg_cpu = (sum(app_cpu_values) / len(app_cpu_values))
-            self.log.info("Current average CPU time for app %s = %s",
+            self.log.info("Current average CPU time for app %s = %.2f",
                           self.marathon_app, app_avg_cpu)
             app_avg_mem = (sum(app_mem_values) / len(app_mem_values))
-            self.log.info("Current Average Mem Utilization for app %s = %s",
+            self.log.info("Current Average Mem Utilization for app %s = %.2f",
                           self.marathon_app, app_avg_mem)
 
             # Evaluate whether an autoscale trigger is called for
