@@ -466,6 +466,7 @@ class Autoscaler:
             app_cpu_values = []
             app_mem_values = []
             for task, host in app_task_dict.items():
+                # TODO: run in parallel for all slaves
                 self.log.info("Inspecting task %s on slave %s", task, host)
 
                 cpu_usage = self.get_cpu_usage(task, host)
