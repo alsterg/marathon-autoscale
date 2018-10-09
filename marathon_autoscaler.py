@@ -307,7 +307,7 @@ class Autoscaler:
                             help=('Time in seconds to wait between '
                                   'checks (ie. 20)'),
                             **self.env_or_req('AS_INTERVAL'))
-        parser.add_argument('-v', '--verbose', action="store_true",
+        parser.add_argument('-v', '--verbose', action="store_true", default=False,
                             help='Display DEBUG messages')
         try:
             args = parser.parse_args()
@@ -329,7 +329,7 @@ class Autoscaler:
         self.cool_down_factor = float(args.cool_down_factor)
         self.trigger_number = float(args.trigger_number)
         self.interval = args.interval
-        self.verbose = args.verbose or os.environ.get("AS_VERBOSE")
+        self.verbose = args.verbose
         self.marathon_username = os.environ['MARATHON_USERNAME']
         self.marathon_password = os.environ['MARATHON_PASSWORD']
 
