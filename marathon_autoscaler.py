@@ -367,9 +367,8 @@ class Autoscaler:
             cpus_user_time_secs0 = float(task_stats['cpus_user_time_secs'])
             timestamp0 = float(task_stats['timestamp'])
         else:
-            cpus_system_time_secs0 = 0
-            cpus_user_time_secs0 = 0
-            timestamp0 = 0
+            self.log.error("Could not fetch stats")
+            return -1.0
 
         time.sleep(1)
 
@@ -379,9 +378,8 @@ class Autoscaler:
             cpus_user_time_secs1 = float(task_stats['cpus_user_time_secs'])
             timestamp1 = float(task_stats['timestamp'])
         else:
-            cpus_system_time_secs1 = 0
-            cpus_user_time_secs1 = 0
-            timestamp1 = 0
+            self.log.error("Could not fetch stats")
+            return -1.0
 
         cpus_time_total0 = cpus_system_time_secs0 + cpus_user_time_secs0
         cpus_time_total1 = cpus_system_time_secs1 + cpus_user_time_secs1
@@ -415,9 +413,8 @@ class Autoscaler:
             mem_utilization = 100 * (float(mem_rss_bytes) / float(mem_limit_bytes))
 
         else:
-            mem_rss_bytes = 0
-            mem_limit_bytes = 0
-            mem_utilization = 0
+            self.log.error("Could not fetch stats")
+            return -1.0
 
         self.log.debug("task %s mem_rss_bytes %s mem_utilization %s mem_limit_bytes %s",
                        task, mem_rss_bytes, mem_utilization, mem_limit_bytes)
