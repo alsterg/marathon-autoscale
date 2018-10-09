@@ -366,6 +366,10 @@ class Autoscaler:
             cpus_system_time_secs0 = float(task_stats['cpus_system_time_secs'])
             cpus_user_time_secs0 = float(task_stats['cpus_user_time_secs'])
             timestamp0 = float(task_stats['timestamp'])
+            cpus_limit = float(task_stats['cpus_limit'])
+            if cpus_limit == 0:
+                self.log.error("cpus_limit == 0")
+                return -1.0
         else:
             self.log.error("Could not fetch stats")
             return -1.0
@@ -391,7 +395,7 @@ class Autoscaler:
             self.log.error("timestamp_delta for task %s slave %s is 0", task, host)
             return -1.0
 
-        cpu_usage = float(cpus_time_delta / timestamp_delta) * 100
+        cpu_usage = float(cpus_time_delta / timestamp_delta / cpus_limit) * 100
         return cpu_usage
 
     def get_mem_usage(self, task, host):
