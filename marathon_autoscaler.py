@@ -10,12 +10,14 @@ import sys
 import time
 from marathon import MarathonClient
 import requests
+import concurrent.futures
 
 # Disable InsecureRequestWarning
 from requests.packages.urllib3.exceptions import InsecureRequestWarning  # pylint: disable=F0401
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)  # pylint: disable=E1101
 
 MARATHON_AGENT_PORT = ':5051'
+PARALLEL_SLAVE_REQS = 5
 
 # Generating CPU stress:
 # yes > /dev/null &
@@ -444,6 +446,15 @@ class Autoscaler:
             result = {'required': True}
         return result
 
+    def get_task_metrics_from_slave(self, task, host):
+        self.log.info("Inspecting task %s on slave %s", task, host)
+
+        cpu_usage = self.get_cpu_usage(task, host)
+        mem_utilization = self.get_mem_usage(task, host)
+        self.log.debug("Resource usage for task %s on slave %s is CPU:%.2f MEM:%.2f",
+                       task, host, cpu_usage, mem_utilization)
+        return cpu_usage, mem_utilization
+
     def run(self):
         """Main function
         Runs the query - compute - act cycle
@@ -465,21 +476,22 @@ class Autoscaler:
 
             app_cpu_values = []
             app_mem_values = []
-            for task, host in app_task_dict.items():
-                # TODO: run in parallel for all slaves
-                self.log.info("Inspecting task %s on slave %s", task, host)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=PARALLEL_SLAVE_REQS) as executor:
+                futures = {executor.submit(self.get_task_metrics_from_slave, task, host): host for task, host in
+                           app_task_dict.items()}
 
-                cpu_usage = self.get_cpu_usage(task, host)
-                mem_utilization = self.get_mem_usage(task, host)
-                self.log.debug("Resource usage for task %s on slave %s is CPU:%.2f MEM:%.2f",
-                               task, host, cpu_usage, mem_utilization)
-
-                if cpu_usage == -1.0 or mem_utilization == -1.0:
+                try:
+                    for f in concurrent.futures.as_completed(futures):
+                        host = futures[f]
+                        cpu_usage, mem_utilization = f.result()
+                        if cpu_usage == -1.0 or mem_utilization == -1.0:
+                            raise Exception("Failed to fetch metrics from host %s", host)
+                        app_cpu_values.append(cpu_usage)
+                        app_mem_values.append(mem_utilization)
+                except Exception as exc:
+                    self.log.error('Host %s generated an exception: %s' % (host, exc))
                     self.timer()
                     continue
-
-                app_cpu_values.append(cpu_usage)
-                app_mem_values.append(mem_utilization)
 
             # Normalized data for all tasks into a single value by averaging
             app_avg_cpu = (sum(app_cpu_values) / len(app_cpu_values))
