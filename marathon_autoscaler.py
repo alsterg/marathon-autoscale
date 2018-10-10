@@ -347,7 +347,7 @@ class Autoscaler:
         self.marathon_password = os.environ['MARATHON_PASSWORD']
 
         if self.csv_file:
-            f = open(self.csv_file, 'w', newline='')
+            f = open(self.csv_file, 'w', newline='', buffering=1)
             self.csv = csv.writer(f, delimiter=' ', quotechar='|', quoting=csv.QUOTE_MINIMAL)
             header = ["timestamp", "instances", "min_instances", "max_instances", "min_cpu", "max_cpu", "min_mem", "max_mem"]
             for r in ["cpu", "mem"]:
