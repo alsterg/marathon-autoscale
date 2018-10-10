@@ -212,8 +212,9 @@ class Autoscaler:
 
         if self.app_instances != target_instances:
             self.log.info("scale_app: app_instances=%s target_instances=%s", self.app_instances, target_instances)
-            response = self.client.scale_app(self.marathon_app, instances=target_instances)
-            self.log.debug("scale_app %s", response)
+            if not self.dry_run:
+                response = self.client.scale_app(self.marathon_app, instances=target_instances)
+                self.log.debug("scale_app %s", response)
 
     def get_app_details(self):
         """Retrieve metadata about marathon_app
@@ -312,6 +313,8 @@ class Autoscaler:
                             **self.env_or_req('AS_INTERVAL'))
         parser.add_argument('-v', '--verbose', action="store_true", default=False,
                             help='Display DEBUG messages')
+        parser.add_argument('--dry-run', action="store_true", default=False,
+                            help="Monitor & calculate, but don't actually autocale")
         try:
             args = parser.parse_args()
         except argparse.ArgumentError as arg_err:
@@ -333,6 +336,7 @@ class Autoscaler:
         self.trigger_number = float(args.trigger_number)
         self.interval = args.interval
         self.verbose = args.verbose
+        self.dry_run = args.dry_run
         self.marathon_username = os.environ['MARATHON_USERNAME']
         self.marathon_password = os.environ['MARATHON_PASSWORD']
 
