@@ -349,7 +349,7 @@ class Autoscaler:
         if self.csv_file:
             f = open(self.csv_file, 'w', newline='')
             self.csv = csv.writer(f, delimiter=' ', quotechar='|', quoting=csv.QUOTE_MINIMAL)
-            header = ["timestamp", "instances"]
+            header = ["timestamp", "instances", "min_instances", "max_instances", "min_cpu", "max_cpu", "min_mem", "max_mem"]
             for r in ["cpu", "mem"]:
                 for m in ["mean", "median", "median_low", "median_high", "median_grouped", "mode", "pstdev", "pvariance",
                           "stdev", "variance"]:
@@ -464,7 +464,10 @@ class Autoscaler:
 
     def write_csv_line(self, app_cpu_stats, app_mem_stats, instances):
         self.log.debug("Writing CSV log line")
-        self.csv.writerow([int(time.time()), instances] + list(app_cpu_stats.values()) + list(app_mem_stats.values()))
+        self.csv.writerow(
+            [int(time.time()), instances, self.min_instances, self.max_instances, self.min_cpu_time, self.max_cpu_time,
+             self.min_mem_percent, self.max_mem_percent]
+            + list(app_cpu_stats.values()) + list(app_mem_stats.values()))
 
     def calculate_stats(self, data):
         return OrderedDict([
