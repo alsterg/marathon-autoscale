@@ -11,6 +11,9 @@ import time
 from marathon import MarathonClient
 import requests
 import concurrent.futures
+import csv
+import statistics
+from collections import OrderedDict
 
 # Disable InsecureRequestWarning
 from requests.packages.urllib3.exceptions import InsecureRequestWarning  # pylint: disable=F0401
@@ -315,6 +318,8 @@ class Autoscaler:
                             help='Display DEBUG messages')
         parser.add_argument('--dry-run', action="store_true", default=False,
                             help="Monitor & calculate, but don't actually autocale")
+        parser.add_argument('--csv-file',
+                            help="The name of the file to write CSV results data")
         try:
             args = parser.parse_args()
         except argparse.ArgumentError as arg_err:
@@ -337,8 +342,19 @@ class Autoscaler:
         self.interval = args.interval
         self.verbose = args.verbose
         self.dry_run = args.dry_run
+        self.csv_file = args.csv_file
         self.marathon_username = os.environ['MARATHON_USERNAME']
         self.marathon_password = os.environ['MARATHON_PASSWORD']
+
+        if self.csv_file:
+            f = open(self.csv_file, 'w', newline='')
+            self.csv = csv.writer(f, delimiter=' ', quotechar='|', quoting=csv.QUOTE_MINIMAL)
+            header = ["timestamp", "instances"]
+            for r in ["cpu", "mem"]:
+                for m in ["mean", "median", "median_low", "median_high", "median_grouped", "mode", "pstdev", "pvariance",
+                          "stdev", "variance"]:
+                    header += [r + '_' + m]
+            self.csv.writerow(header)
 
     def get_task_slave_stats(self, task, host):
         """ Get the performance Metrics for all the tasks for the marathon
@@ -446,6 +462,24 @@ class Autoscaler:
                         task, host, cpu_usage, mem_utilization)
         return cpu_usage, mem_utilization
 
+    def write_csv_line(self, app_cpu_stats, app_mem_stats, instances):
+        self.log.debug("Writing CSV log line")
+        self.csv.writerow([int(time.time()), instances] + list(app_cpu_stats.values()) + list(app_mem_stats.values()))
+
+    def calculate_stats(self, data):
+        return OrderedDict([
+            ("mean", statistics.mean(data)),
+            ("median", statistics.median(data)),
+            ("median_low", statistics.median_low(data)),
+            ("median_high", statistics.median_high(data)),
+            ("median_grouped", statistics.median_grouped(data)),
+            ("mode", statistics.mode(data)),
+            ("pstdev", statistics.pstdev(data)),
+            ("pvariance", statistics.pvariance(data)),
+            ("stdev", statistics.stdev(data) if len(data) > 1 else 'NA'),
+            ("variance", statistics.variance(data) if len(data) > 1 else 'NA')
+        ])
+
     def run(self):
         """Main function
         Runs the query - compute - act cycle
@@ -490,13 +524,18 @@ class Autoscaler:
                 self.timer()
                 continue
 
-            # Normalized data for all tasks into a single value by averaging
-            app_avg_cpu = (sum(app_cpu_values) / len(app_cpu_values))
+            app_cpu_stats = self.calculate_stats(app_cpu_values)
+            app_mem_stats = self.calculate_stats(app_mem_values)
+
+            app_avg_cpu = app_cpu_stats['mean']
             self.log.info("Current average CPU time for app %s = %.2f",
                           self.marathon_app, app_avg_cpu)
-            app_avg_mem = (sum(app_mem_values) / len(app_mem_values))
+            app_avg_mem = app_mem_stats['mean']
             self.log.info("Current Average Mem Utilization for app %s = %.2f",
                           self.marathon_app, app_avg_mem)
+
+            if self.csv_file:
+                self.write_csv_line(app_cpu_stats, app_mem_stats, self.app_instances)
 
             # Evaluate whether an autoscale trigger is called for
             self.autoscale(app_avg_cpu, app_avg_mem)
