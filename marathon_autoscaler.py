@@ -357,13 +357,12 @@ class Autoscaler:
                 self.log.debug("stats for task %s on host %s: %s", executor_id, host, task_stats)
                 return task_stats
 
-    def get_cpu_usage(self, task, host):
+    def get_cpu_usage(self, task_stats, task, host):
         """Compute the cpu usage for a given task and slave within the sampled window.
 
         Returns:
             the % of CPU utilization since last time the cpu metrics were fetch for the same task/host.
         """
-        task_stats = self.get_task_slave_stats(task, host)
         if task_stats is not None:
             cpus_system_time_secs_now = float(task_stats['cpus_system_time_secs'])
             cpus_user_time_secs_now = float(task_stats['cpus_user_time_secs'])
@@ -388,13 +387,12 @@ class Autoscaler:
         cpu_usage = float(cpus_time_delta / timestamp_delta / cpus_limit) * 100
         return cpu_usage
 
-    def get_mem_usage(self, task, host):
+    def get_mem_usage(self, task_stats, task, host):
         """Calculate memory usage for a given task and slave
 
         Returns:
             the percentage of RSS memory used versus the limit.
         """
-        task_stats = self.get_task_slave_stats(task, host)
         # RAM usage
         if task_stats is not None:
             mem_rss_bytes = int(task_stats['mem_rss_bytes'])
@@ -436,8 +434,9 @@ class Autoscaler:
     def get_task_metrics_from_slave(self, task, host):
         self.log.info("Inspecting task %s on slave %s", task, host)
 
-        cpu_usage = self.get_cpu_usage(task, host)
-        mem_utilization = self.get_mem_usage(task, host)
+        task_stats = self.get_task_slave_stats(task, host)
+        cpu_usage = self.get_cpu_usage(task_stats, task, host)
+        mem_utilization = self.get_mem_usage(task_stats, task, host)
 
         self.log.debug("Resource usage for task %s on slave %s is CPU:%.2f MEM:%.2f",
                         task, host, cpu_usage, mem_utilization)
