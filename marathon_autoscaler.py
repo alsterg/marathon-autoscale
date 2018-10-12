@@ -459,7 +459,7 @@ class Autoscaler:
         mem_utilization = self.get_mem_usage(task_stats, task, host)
 
         self.log.debug("Resource usage for task %s on slave %s is CPU:%.2f MEM:%.2f",
-                        task, host, cpu_usage, mem_utilization)
+                        task, host, cpu_usage if cpu_usage else -1, mem_utilization if mem_utilization else -1)
         return cpu_usage, mem_utilization
 
     def write_csv_line(self, app_cpu_stats, app_mem_stats, instances):
