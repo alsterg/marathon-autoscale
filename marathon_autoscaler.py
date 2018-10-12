@@ -397,6 +397,7 @@ class Autoscaler:
             return
 
         cpus_time_total_prev, timestamp_prev = self.cpu_util_cache[(task, host)]
+        self.cpu_util_cache[(task, host)] = cpus_time_total_now, timestamp_now
 
         cpus_time_delta = cpus_time_total_now - cpus_time_total_prev
         timestamp_delta = timestamp_now - timestamp_prev
