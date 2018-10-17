@@ -351,7 +351,7 @@ class Autoscaler:
             self.csv = csv.writer(f, delimiter=' ', quotechar='|', quoting=csv.QUOTE_MINIMAL)
             header = ["timestamp", "instances", "min_instances", "max_instances", "min_cpu", "max_cpu", "min_mem", "max_mem"]
             for r in ["cpu", "mem"]:
-                for m in ["mean", "median", "median_low", "median_high", "median_grouped", "mode", "pstdev", "pvariance",
+                for m in ["mean", "median", "median_low", "median_high", "median_grouped", "pstdev", "pvariance",
                           "stdev", "variance"]:
                     header += [r + '_' + m]
             self.csv.writerow(header)
@@ -477,7 +477,6 @@ class Autoscaler:
             ("median_low", statistics.median_low(data)),
             ("median_high", statistics.median_high(data)),
             ("median_grouped", statistics.median_grouped(data)),
-            ("mode", statistics.mode(data)),
             ("pstdev", statistics.pstdev(data)),
             ("pvariance", statistics.pvariance(data)),
             ("stdev", statistics.stdev(data) if len(data) > 1 else 'NA'),
