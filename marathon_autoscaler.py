@@ -9,6 +9,7 @@ import os
 import sys
 import time
 from marathon import MarathonClient
+from marathon.exceptions import MarathonHttpError
 import requests
 import concurrent.futures
 import csv
@@ -65,6 +66,10 @@ class Autoscaler:
         self.log.info("Connecting to marathon at '%s'" % self.marathon_master)
         self.client = MarathonClient(self.marathon_master, verify=False,
                                      username=self.marathon_username, password=self.marathon_password)
+
+        # Metrics
+        self.marathon_error_counter = 0
+        self.mesos_error_counter = 0
 
     # pylint: disable=too-many-branches
     # pylint: disable=too-many-statements
@@ -216,8 +221,13 @@ class Autoscaler:
         if self.app_instances != target_instances:
             self.log.info("scale_app: app_instances=%s target_instances=%s", self.app_instances, target_instances)
             if not self.dry_run:
-                response = self.client.scale_app(self.marathon_app, instances=target_instances)
-                self.log.debug("scale_app %s", response)
+                try:
+                    response = self.client.scale_app(self.marathon_app, instances=target_instances)
+                except MarathonHttpError as e:
+                    self.log.error("Failed to scale app: %s" % e)
+                    self.marathon_error_counter += 1
+                else:
+                    self.log.debug("scale_app %s", response)
 
     def get_app_details(self):
         """Retrieve metadata about marathon_app
@@ -349,7 +359,8 @@ class Autoscaler:
         if self.csv_file:
             f = open(self.csv_file, 'w', newline='', buffering=1)
             self.csv = csv.writer(f, delimiter=' ', quotechar='|', quoting=csv.QUOTE_MINIMAL)
-            header = ["timestamp", "instances", "min_instances", "max_instances", "min_cpu", "max_cpu", "min_mem", "max_mem"]
+            header = ["timestamp", "marathon_errors", "mesos_errors", "instances", "min_instances", "max_instances",
+                      "min_cpu", "max_cpu", "min_mem", "max_mem"]
             for r in ["cpu", "mem"]:
                 for m in ["mean", "median", "median_low", "median_high", "median_grouped", "pstdev", "pvariance",
                           "stdev", "variance"]:
@@ -466,7 +477,8 @@ class Autoscaler:
     def write_csv_line(self, app_cpu_stats, app_mem_stats, instances):
         self.log.debug("Writing CSV log line")
         self.csv.writerow(
-            [int(time.time()), instances, self.min_instances, self.max_instances, self.min_cpu_time, self.max_cpu_time,
+            [int(time.time()), self.marathon_error_counter, self.mesos_error_counter, instances, self.min_instances,
+             self.max_instances, self.min_cpu_time, self.max_cpu_time,
              self.min_mem_percent, self.max_mem_percent]
             + list(app_cpu_stats.values()) + list(app_mem_stats.values()))
 
@@ -519,6 +531,7 @@ class Autoscaler:
                 except Exception as exc:
                     # TODO: Cope with some slave failures
                     self.log.error('Fetching metrics from %s generated an exception: %s' % (host, exc))
+                    self.mesos_error_counter += 1
                     self.timer()
                     continue
 
