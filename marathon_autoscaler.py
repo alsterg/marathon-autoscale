@@ -204,7 +204,7 @@ class Autoscaler:
                 self.log.info("Reached the set maximum of instances %s", self.max_instances)
                 target_instances = self.max_instances
         else:
-            target_instances = math.ceil(self.app_instances / self.autoscale_multiplier)
+            target_instances = math.floor(self.app_instances / self.autoscale_multiplier)
             if target_instances < self.min_instances:
                 self.log.info("Reached the set minimum of instances %s", self.min_instances)
                 target_instances = self.min_instances
