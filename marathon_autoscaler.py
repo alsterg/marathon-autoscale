@@ -9,7 +9,6 @@ import os
 import sys
 import time
 from marathon import MarathonClient
-from marathon.exceptions import MarathonHttpError
 import requests
 import concurrent.futures
 import csv
@@ -90,12 +89,10 @@ class Autoscaler:
                   and (self.trigger_var >= self.trigger_number)):
                 self.log.info("Autoscale triggered based on Mem and CPU exceeding threshold")
                 self.scale_app(True)
-                self.trigger_var = 0
             elif ((app_avg_cpu < self.max_cpu_time) and (app_avg_mem < self.max_mem_percent)
                   and (self.cool_down >= self.cool_down_factor)):
                 self.log.info("Autoscale triggered based on Mem and CPU below the threshold")
                 self.scale_app(False)
-                self.cool_down = 0
             elif (app_avg_cpu > self.max_cpu_time) and (app_avg_mem > self.max_mem_percent):
                 self.trigger_var += 1
                 self.cool_down = 0
@@ -122,12 +119,10 @@ class Autoscaler:
                   and (self.trigger_var >= self.trigger_number)):
                 self.log.info("Autoscale triggered based Mem or CPU exceeding threshold")
                 self.scale_app(True)
-                self.trigger_var = 0
             elif (((app_avg_cpu < self.max_cpu_time) or (app_avg_mem < self.max_mem_percent))
                   and (self.cool_down >= self.cool_down_factor)):
                 self.log.info("Autoscale triggered based on Mem or CPU under the threshold")
                 self.scale_app(False)
-                self.cool_down = 0
             elif (app_avg_cpu > self.max_cpu_time) or (app_avg_mem > self.max_mem_percent):
                 self.trigger_var += 1
                 self.cool_down = 0
@@ -150,11 +145,9 @@ class Autoscaler:
             elif (app_avg_cpu > self.max_cpu_time) and (self.trigger_var >= self.trigger_number):
                 self.log.info("Autoscale triggered based on CPU exceeding threshold")
                 self.scale_app(True)
-                self.trigger_var = 0
             elif (app_avg_cpu < self.max_cpu_time) and (self.cool_down >= self.cool_down_factor):
                 self.log.info("Autoscale triggered based on CPU under the threshold")
                 self.scale_app(False)
-                self.cool_down = 0
             elif app_avg_cpu > self.max_cpu_time:
                 self.trigger_var += 1
                 self.cool_down = 0
@@ -179,12 +172,10 @@ class Autoscaler:
                   (self.trigger_var >= self.trigger_number)):
                 self.log.info("Autoscale triggered based Mem exceeding threshold")
                 self.scale_app(True)
-                self.trigger_var = 0
             elif ((app_avg_mem < self.max_mem_percent) and
                   (self.cool_down >= self.cool_down_factor)):
                 self.log.info("Autoscale triggered based on Mem below the threshold")
                 self.scale_app(False)
-                self.cool_down = 0
             elif app_avg_mem > self.max_mem_percent:
                 self.trigger_var += 1
                 self.cool_down = 0
@@ -223,11 +214,15 @@ class Autoscaler:
             if not self.dry_run:
                 try:
                     response = self.client.scale_app(self.marathon_app, instances=target_instances)
-                except MarathonHttpError as e:
+                except Exception as e:
                     self.log.error("Failed to scale app: %s" % e)
                     self.marathon_error_counter += 1
                 else:
                     self.log.debug("scale_app %s", response)
+                    if is_up:
+                        self.trigger_var = 0
+                    else:
+                        self.cool_down = 0
 
     def get_app_details(self):
         """Retrieve metadata about marathon_app
@@ -503,7 +498,14 @@ class Autoscaler:
         self.cool_down = 0
         self.trigger_var = 0
         while running == 1:
-            marathon_apps = self.get_all_apps()
+            try:
+                marathon_apps = self.get_all_apps()
+            except Exception as e:
+                self.log.error("Failed to get app list: %s" % e)
+                self.marathon_error_counter += 1
+                self.timer()
+                continue
+
             # Quick sanity check to test for apps existence in Marathon.
             if self.marathon_app not in marathon_apps:
                 self.log.error("Could not find %s", self.marathon_app)
@@ -511,7 +513,14 @@ class Autoscaler:
                 continue
 
             # Get a dictionary of app taskId and hostId for the marathon app
-            app_task_dict = self.get_app_details()
+            try:
+                app_task_dict = self.get_app_details()
+            except Exception as e:
+                self.log.error("Failed to get app details: %s" % e)
+                self.marathon_error_counter += 1
+                self.timer()
+                continue
+
             self.log.debug("Tasks for %s : %s", self.marathon_app, app_task_dict)
 
             app_cpu_values = []
@@ -520,20 +529,18 @@ class Autoscaler:
                 futures = {executor.submit(self.get_task_metrics_from_slave, task, host): host for task, host in
                            app_task_dict.items()}
 
-                try:
-                    for f in concurrent.futures.as_completed(futures):
-                        host = futures[f]
+                for f in concurrent.futures.as_completed(futures):
+                    host = futures[f]
+                    try:
                         cpu_usage, mem_utilization = f.result()
-                        if cpu_usage is None or mem_utilization is None:
-                            continue  # Ignore this host in this iteration, next time it will be ok
-                        app_cpu_values.append(cpu_usage)
-                        app_mem_values.append(mem_utilization)
-                except Exception as exc:
-                    # TODO: Cope with some slave failures
-                    self.log.error('Fetching metrics from %s generated an exception: %s' % (host, exc))
-                    self.mesos_error_counter += 1
-                    self.timer()
-                    continue
+                    except Exception as exc:
+                        self.log.error('Fetching metrics from %s generated an exception: %s' % (host, exc))
+                        self.mesos_error_counter += 1
+                        continue
+                    if cpu_usage is None or mem_utilization is None:
+                        continue  # Ignore this host in this iteration, next time it will be ok
+                    app_cpu_values.append(cpu_usage)
+                    app_mem_values.append(mem_utilization)
 
             if len(app_cpu_values) == 0 or len(app_mem_values) == 0:
                 self.log.info('Ignoring results of first iteration')
