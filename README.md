@@ -73,6 +73,10 @@ In this mode, the system will only scale the service up or down when both CPU an
 
 In this mode, the system will scale the service up or down when either the CPU or Memory have been out of range for the number of cycles defined in AS_TRIGGER_NUMBER (for up) or AS_COOL_DOWN_FACTOR (for down).
 
+#### OR_AND 
+
+In this mode, the system will scale the service up if either CPU or Memory have been above of the upper bound for the number of cycles defined in AS_TRIGGER_NUMBER, and scale down if both CPU and Memory have been below the lower bound for the number of cycles defined in AS_COOL_DOWN_FACTOR. (Recommended)
+
 #### CPU 
 
 In this mode, the system will scale the service up or down when the CPU has been out of range for the number of cycles defined in AS_TRIGGER_NUMBER (for up) or AS_COOL_DOWN_FACTOR (for down).

@@ -79,7 +79,37 @@ class Autoscaler:
             app_avg_cpu(float): The average cpu utilization across all tasks for marathon_app
             app_avg_mem(float): The average memory utilization across all tasks for marathon_app
         """
-        if self.trigger_mode == "and":
+        if self.trigger_mode == "or_and":
+            if ((self.min_cpu_time <= app_avg_cpu <= self.max_cpu_time)
+                    and (self.min_mem_percent <= app_avg_mem <= self.max_mem_percent)):
+                self.log.info("CPU and Memory within thresholds")
+                self.trigger_var = 0
+                self.cool_down = 0
+            elif ((app_avg_cpu > self.max_cpu_time) or (app_avg_mem > self.max_mem_percent)
+                  and (self.trigger_var >= self.trigger_number)):
+                self.log.info("Autoscale triggered based on Mem or CPU exceeding threshold")
+                self.scale_app(True)
+            elif ((app_avg_cpu < self.min_cpu_time) and (app_avg_mem < self.min_mem_percent)
+                  and (self.cool_down >= self.cool_down_factor)):
+                self.log.info("Autoscale triggered based on Mem and CPU below the threshold")
+                self.scale_app(False)
+            elif (app_avg_cpu > self.max_cpu_time) or (app_avg_mem > self.max_mem_percent):
+                self.trigger_var += 1
+                self.cool_down = 0
+                self.log.info(("Limits exceeded but waiting for trigger_number"
+                               " to be exceeded too to scale up %s of %s"),
+                              self.trigger_var, self.trigger_number)
+            elif ((app_avg_cpu < self.min_cpu_time) and (app_avg_mem < self.min_mem_percent)
+                  and (self.cool_down < self.cool_down_factor)):
+                self.cool_down += 1
+                self.trigger_var = 0
+                self.log.info(("Limits are not exceeded but waiting for "
+                               "cool_down to be exceeded too to scale "
+                               "down %s of %s"),
+                              self.cool_down, self.cool_down_factor)
+            else:
+                self.log.info("Mem and CPU usage not exceeding thresholds")
+        elif self.trigger_mode == "and":
             if ((self.min_cpu_time <= app_avg_cpu <= self.max_cpu_time)
                     and (self.min_mem_percent <= app_avg_mem <= self.max_mem_percent)):
                 self.log.info("CPU and Memory within thresholds")
@@ -108,7 +138,7 @@ class Autoscaler:
                                "down %s of %s"),
                               self.cool_down, self.cool_down_factor)
             else:
-                self.log.info("Mem and CPU usage exceeding thresholds")
+                self.log.info("Mem and CPU usage not exceeding thresholds")
         elif self.trigger_mode == "or":
             if ((self.min_cpu_time <= app_avg_cpu <= self.max_cpu_time)
                     and (self.min_mem_percent <= app_avg_mem <= self.max_mem_percent)):
@@ -292,7 +322,7 @@ class Autoscaler:
                             **self.env_or_req('AS_MIN_CPU_TIME'))
         parser.add_argument('--trigger_mode',
                             help=('Which metric(s) to trigger Autoscale '
-                                  '(and, or, cpu, mem)'),
+                                  '(and, or, or_and, cpu, mem)'),
                             **self.env_or_req('AS_TRIGGER_MODE'))
         parser.add_argument('--autoscale_multiplier', type=float,
                             help=('Autoscale multiplier for triggered '
