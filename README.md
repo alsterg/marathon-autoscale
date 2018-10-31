@@ -1,11 +1,9 @@
 # marathon-autoscale
-Dockerized container autoscaler that can be run under Marathon management to dynamically scale a service running on DC/OS.
-
+Dockerized container autoscaler that can dynamically scale a service running on Marathon based on CPU and/or MEM utilization.
 
 ## Prerequisites
-A running DCOS cluster.
-
-If running on a DC/OS cluster in Permissive or Strict mode, an user or service account with the appropriate permissions to modify Marathon jobs.  An example script for setting up a service account can be found in create-service-account.sh
+A running Mesos/Marathon cluster.
+An Account on Marathon with permissions to probe for apps and scale them up or down.
 
 ## Building the Docker container
 
@@ -15,53 +13,72 @@ How to build the container:
     docker tag <tag-id> <docker-hub-name>:marathon-autoscale:latest
     docker push <docker-hub-name>:marathon-autoscale:latest
 
-## Creating a service account
-
-The create_service_account.sh script takes two parameters: 
-
-    Service-Account-Name #the name of the service account you want to create
-    Namespace-Path #the path to launch this service under marathon management.  e.g. / or /dev
-
-####    $ ./create-service-account.sh [service-account-name] [namespace-path]
-
 ## Program Execution
-The python program runs on marathon and can be executed using the following command:
+The program accepts the following arguments:
 
-#### $ dcos marathon app add marathon.json
+      --marathon-master MARATHON_MASTER
+                            The DNS hostname or IP of your Marathon Instance;
+                            remember to set MARATHON_USERNAME and
+                            MARATHON_PASSWORD to enable authentication
+      --max_mem_percent MAX_MEM_PERCENT
+                            The Max percent of Mem Usage averaged across all
+                            Application Instances to trigger Autoscale (ie. 80)
+      --max_cpu_time MAX_CPU_TIME
+                            The max percent of CPU Usage averaged across all
+                            Application Instances to trigger Autoscale (ie. 80)
+      --min_mem_percent MIN_MEM_PERCENT
+                            The min percent of Mem Usage averaged across all
+                            Application Instances to trigger Autoscale (ie. 55)
+      --min_cpu_time MIN_CPU_TIME
+                            The min percent of CPU Usage averaged across all
+                            Application Instances to trigger Autoscale (ie. 50)
+      --trigger_mode TRIGGER_MODE
+                            Which metric(s) to trigger Autoscale (and, or, or_and,
+                            cpu, mem)
+      --autoscale_multiplier AUTOSCALE_MULTIPLIER
+                            Autoscale multiplier for triggered Autoscale (ie 2)
+      --max_instances MAX_INSTANCES
+                            The Max instances that should ever exist for this
+                            application (ie. 20)
+      --marathon-app MARATHON_APP
+                            Marathon Application Name to Configure Autoscale for
+                            from the Marathon UI
+      --min_instances MIN_INSTANCES
+                            Minimum number of instances to maintain
+      --cool-down-factor COOL_DOWN_FACTOR
+                            Number of cycles to avoid scaling again
+      --trigger_number TRIGGER_NUMBER
+                            Number of cycles to avoid scaling again
+      --interval INTERVAL   Time in seconds to wait between checks (ie. 20)
+      -v, --verbose         Display DEBUG messages
+      --dry-run             Monitor & calculate, but don't actually autocale
+      --csv-file CSV_FILE   The name of the file to write CSV results data
 
-Where the marathon.json has been built from one of the samples:
+## Input parameters
 
-    sample-autoscale-noauth-marathon.json #security disabled or OSS DC/OS
-    sample-autoscale-username-marathon.json #security permissive or strict on Enterprise DC/OS, using username and password (password stored as a secret)
-    sample-autoscale-svcacct-marathon.json #security permissive or strict on Enterprise DC/OS, using service account and private key (private key stored as a secret)
+Some of the command line parameters can be overwritten by environment variables:
 
-Input paramters user will be prompted for:
-
-    AS_MARATHON_APP: # app to autoscale
-    AS_TRIGGER_MODE: and | or | cpu | mem #which scaling mode you want
-    AS_MIN_INSTANCES: #min number of instances, don’t make less than 2
-    AS_MAX_INSTANCES: #max number of instances, must be greater than AS_MIN_INSTANCES
-    AS_DCOS_MASTER: #don’t change unless running marathon-on-marathon
-    AS_MAX_CPU_TIME #max average cpu time as float, e.g. 80 or 80.5
-    AS_MIN_CPU_TIME #min average cpu time as float, e.g. 55 or 55.5
-    AS_MAX_MEM_PERCENT #max avg mem utilization percent as float, e.g. 75 or 75.0
-    AS_MIN_MEM_PERCENT #min avg men utilization percent as float, e.g. 55 or 55.0
-    AS_COOL_DOWN_FACTOR # how many times should we poll before scaling down
-    AS_TRIGGER_NUMBER # how many times should we pole before scaling up
-    AS_INTERVAL #how often should we poll in seconds
-    AS_AUTOSCALE_MULTIPLIER # The number by which current instances will be multiplied (scale-out) or divided (scale-in). This determines how many instances to add during scale-out, or remove during scale-in.
+    AS_MARATHON_APP
+    AS_TRIGGER_MODE
+    AS_MIN_INSTANCES
+    AS_MAX_INSTANCES
+    AS_MAX_CPU_TIME
+    AS_MIN_CPU_TIME
+    AS_MAX_MEM_PERCENT
+    AS_MIN_MEM_PERCENT
+    AS_COOL_DOWN_FACTOR
+    AS_TRIGGER_NUMBER
+    AS_INTERVAL
+    AS_AUTOSCALE_MULTIPLIER
 
 **Notes** 
 
-For MIN_CPU_TIME and MAX_CPU_TIME on multicore containers, the calculation for determining the value is # of CPU * desired CPU utilization percentage = CPU time (e.g. 80 cpu time * 2 cpu = 160 cpu time)
+For MIN_CPU_TIME and MAX_CPU_TIME is taking the number of available container cores into consideration. So an 80% value refers to all cores.
 For MIN_MEM_PERCENT and MAX_MEM_PERCENT on very small containers, remember that Mesos adds 32MB to the container spec for container overhead (namespace and cgroup), so your target percentages should take that into account.  Alternatively, consider using the CPU only scaling mode for containers with very small memory footprints.
 
-If you are using an authentication:
+## Authentication
 
-    AS_USERID #username of the user or service account with access to scale the service
-    --and either--
-    AS_PASSWORD: secret0 #password of the userid above ideally from the secret store
-    AS_SECRET: secret0 #private key of the userid above ideally from the secret store
+To authenticate to Marathon, please set the `MARATHON_USERNAME` and `MARATHON_PASSWORD` environment variables.
 
 ## Scaling Modes
 
